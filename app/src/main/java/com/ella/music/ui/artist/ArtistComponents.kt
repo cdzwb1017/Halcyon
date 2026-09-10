@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -54,6 +55,8 @@ import androidx.compose.ui.unit.sp
 import com.ella.music.R
 import com.ella.music.data.ArtistCoverAsset
 import com.ella.music.data.ArtistCoverKind
+import com.ella.music.data.ArtistDescriptionSaveResult
+import com.ella.music.data.ArtistDescriptionStore
 import com.ella.music.data.SettingsManager
 import com.ella.music.data.lastfm.DEFAULT_LAST_FM_WIKI_REGION
 import com.ella.music.data.lastfm.ARTIST_BIO_LANGUAGES
@@ -151,12 +154,14 @@ internal fun openUrl(context: Context, url: String) {
 @Composable
 internal fun ArtistBiographyPanel(
     artistName: String,
+    songs: List<Song> = emptyList(),
     downloadMode: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember(context) { SettingsManager.getInstance(context) }
+    val descriptionStore = remember(context) { ArtistDescriptionStore.getInstance(context) }
     val lastFmApiKey by LastFmSecureStore.getInstance(context).credentials.collectAsState()
     val regionCode by settingsManager.artistBioLastFmLang.collectAsState(initial = DEFAULT_LAST_FM_WIKI_REGION)
     val bioSourceId by settingsManager.artistBioSource.collectAsState(initial = ArtistBioMenuSource.Wikipedia.id)
@@ -175,6 +180,7 @@ internal fun ArtistBiographyPanel(
     var wiki by remember(artistName, selectedRegion, selectedSource) { mutableStateOf<LastFmArtistWiki?>(null) }
     var loading by remember(artistName, selectedRegion, selectedSource) { mutableStateOf(allowed) }
     var failed by remember(artistName, selectedRegion, selectedSource) { mutableStateOf(false) }
+    var saving by remember(artistName, selectedRegion, selectedSource) { mutableStateOf(false) }
     LaunchedEffect(artistName, allowed, selectedRegion, selectedSource, lastFmApiKey.apiKey) {
         if (!allowed) {
             loading = false
@@ -365,6 +371,47 @@ internal fun ArtistBiographyPanel(
                     color = MiuixTheme.colorScheme.primary,
                     modifier = Modifier.clickable {
                         openUrl(context, wiki?.artistUrl.orEmpty())
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.artist_biography_save_to_introduction),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (saving) {
+                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    } else {
+                        MiuixTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.clickable(enabled = !saving && wiki?.text.orEmpty().isNotBlank()) {
+                        val biography = wiki?.text.orEmpty().trim()
+                        if (biography.isBlank()) return@clickable
+                        saving = true
+                        scope.launch {
+                            val result = runCatching {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    descriptionStore.save(artistName, songs, biography)
+                                }
+                            }
+                            saving = false
+                            result.onSuccess { saveResult ->
+                                val message = when (saveResult) {
+                                    ArtistDescriptionSaveResult.SAVED_TO_NFO ->
+                                        R.string.artist_introduction_saved_nfo
+                                    ArtistDescriptionSaveResult.SAVED_LOCALLY ->
+                                        R.string.artist_introduction_saved_local
+                                    ArtistDescriptionSaveResult.CLEARED ->
+                                        R.string.artist_introduction_cleared
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            }.onFailure {
+                                Toast.makeText(
+                                    context,
+                                    R.string.artist_introduction_save_failed,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     }
                 )
             }

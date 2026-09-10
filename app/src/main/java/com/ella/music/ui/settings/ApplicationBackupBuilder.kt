@@ -40,5 +40,30 @@ internal suspend fun buildApplicationBackupJson(
             if (BackupType.AiConfigAndChat in selectedTypes) {
                 put("aiChat", exportAiChatBackupJson(context))
             }
+            if (BackupType.LibraryAndScan in selectedTypes) {
+                exportDescriptionsJson(context, "artist_descriptions.properties")?.let {
+                    put("artistDescriptions", it)
+                }
+                exportDescriptionsJson(context, "album_descriptions.properties")?.let {
+                    put("albumDescriptions", it)
+                }
+            }
         }
+}
+
+internal fun exportDescriptionsJson(context: Context, fileName: String): JSONObject? =
+    exportDescriptionsJson(context.filesDir, fileName)
+
+internal fun exportDescriptionsJson(filesDir: java.io.File, fileName: String): JSONObject? {
+    val file = java.io.File(filesDir, fileName)
+    if (!file.isFile || !file.canRead() || file.length() == 0L) return null
+    return runCatching {
+        val props = java.util.Properties().apply {
+            file.reader(Charsets.UTF_8).use { reader -> load(reader) }
+        }
+        if (props.isEmpty) return null
+        JSONObject().apply {
+            props.forEach { (k, v) -> put(k.toString(), v.toString()) }
+        }
+    }.getOrNull()
 }

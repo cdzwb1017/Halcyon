@@ -313,6 +313,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private var lyricBlacklistRules = emptyList<LyricBlacklistRule>()
     private var hideLyricExtraInfo = true
     private var lyricOpeningTemplate = ""
+    private var lyricOpeningAsFallback = false
     private var appliedDecoderMode: Int? = null
     private var appliedLyricSourceMode: Int? = null
     private var previousButtonAction = SettingsManager.PREVIOUS_BUTTON_PREVIOUS
@@ -353,6 +354,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         initLyricPageTranslation()
         initBluetoothLyric()
         playbackSettingsBridge.initShuffleMode()
+        playbackSettingsBridge.initShufflePolicies()
         playbackSettingsBridge.initPlayNextMode()
         initPreviousButtonAction()
         playbackSettingsBridge.initResumePlaybackPosition()
@@ -763,8 +765,14 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     private fun initLyricOpeningTemplate() {
         viewModelScope.launch {
             var initialized = false
-            settingsManager.lyricOpeningTemplate.distinctUntilChanged().collect { template ->
+            combine(
+                settingsManager.lyricOpeningTemplate,
+                settingsManager.lyricOpeningAsFallback
+            ) { template, fallback ->
+                template to fallback
+            }.distinctUntilChanged().collect { (template, fallback) ->
                 lyricOpeningTemplate = template
+                lyricOpeningAsFallback = fallback
                 if (!initialized) {
                     initialized = true
                     applyCurrentLyricOffset(notifyExternal = false)
@@ -1370,7 +1378,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         val nextLyrics = _rawLyrics.value
             .filterBlacklistedLyricLines()
             .shiftedBy(offsetMs)
-            .withOpeningMetadataLine(song, lyricOpeningTemplate)
+            .withOpeningMetadataLine(song, lyricOpeningTemplate, lyricOpeningAsFallback)
             .withImplicitLineEndTimes()
         val lyricsChanged = _lyrics.value != nextLyrics
         if (lyricsChanged) {
@@ -1480,7 +1488,8 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         songs: List<Song>,
         startIndex: Int = 0,
         resumeCategoryKey: String? = null,
-        songSources: Map<String, String>? = null
+        songSources: Map<String, String>? = null,
+        preserveOrder: Boolean = false
     ) {
         if (songs.isEmpty()) {
             activeResumeCategoryKey = resumeCategoryKey?.takeIf { it.isNotBlank() }
@@ -1488,7 +1497,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             com.ella.music.data.PlaybackSourceNavigation.updateSource(null)
             return
         }
-        val randomStartIndex = if (songs.size > 1 && startIndex == 0) songs.indices.random()
+        val randomStartIndex = if (!preserveOrder && songs.size > 1 && startIndex == 0) songs.indices.random()
         else startIndex.coerceIn(songs.indices)
         lazyOnlineQueueController.clear()
         if (!songSources.isNullOrEmpty()) {
@@ -1503,7 +1512,7 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         _playbackSourceKey.value = queueSource
         com.ella.music.data.PlaybackSourceNavigation.updateSource(queueSource)
         recordCategoryResume(sourceAwareSongs[randomStartIndex])
-        playerManager.setPlaylistForShuffleAll(sourceAwareSongs, randomStartIndex)
+        playerManager.setPlaylistForShuffleAll(sourceAwareSongs, randomStartIndex, preserveOrder)
     }
 
     private fun recordCategoryResume(song: Song) {
@@ -1642,6 +1651,11 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
             settingsManager.setShuffleMode(mode)
             playerManager.setShuffleMode(mode)
         }
+    }
+
+    fun setDisableSequentialPlayback(enabled: Boolean) {
+        playerManager.setDisableSequentialPlayback(enabled)
+        viewModelScope.launch { settingsManager.setDisableSequentialPlayback(enabled) }
     }
 
     fun setPlayNextMode(mode: Int) {

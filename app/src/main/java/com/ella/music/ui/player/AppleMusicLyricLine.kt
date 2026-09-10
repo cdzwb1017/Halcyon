@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -42,18 +43,22 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ella.music.data.SettingsManager
 import com.ella.music.data.model.LyricLine
 import com.ella.music.data.model.LyricWord
+import com.ella.music.data.parser.isRtlText
 import kotlin.math.abs
 import kotlin.math.hypot
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Gap between the original lyric and stacked romanization / translation. */
@@ -232,23 +237,38 @@ internal fun AppleMusicLyricLine(
         color = contentColor.copy(alpha = alpha * secondaryAlpha.coerceIn(0f, 1f)),
         textAlign = textAlign
     )
+    val rubyFontSize = (primaryTextSizeSp * fontScale * 0.40f).coerceIn(9.5f, 13.5f)
+    val rubyStyle = TextStyle(
+        fontSize = rubyFontSize.sp,
+        lineHeight = (rubyFontSize * 1.15f).sp,
+        fontWeight = FontWeight.Medium,
+        fontFamily = translationFontFamily,
+        letterSpacing = (-0.25).sp,
+        color = contentColor.copy(alpha = alpha * secondaryAlpha.coerceIn(0f, 1f)),
+        textAlign = TextAlign.Center
+    )
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationY = (distance * -2f) * density
-                transformOrigin = TransformOrigin(
-                    pivotFractionX = when (textAlign) {
-                        TextAlign.End -> 1f
-                        TextAlign.Center -> 0.5f
-                        else -> 0f
-                    },
-                    pivotFractionY = 0.5f
-                )
-            }
+    val isRtl = remember(line.text, line.backgroundText) {
+        line.text.isRtlText() || (line.text.isBlank() && line.backgroundText.orEmpty().isRtlText())
+    }
+
+    CompositionLocalProvider(LocalLayoutDirection provides (if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr)) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationY = (distance * -2f) * density
+                    transformOrigin = TransformOrigin(
+                        pivotFractionX = when (textAlign) {
+                            TextAlign.End -> if (isRtl) 0f else 1f
+                            TextAlign.Center -> 0.5f
+                            else -> if (isRtl) 1f else 0f
+                        },
+                        pivotFractionY = 0.5f
+                    )
+                }
             .then(
                 if (
                     nonCurrentLineBlurEnabled && nonCurrentLineBlurPercent > 0 &&
@@ -312,7 +332,7 @@ internal fun AppleMusicLyricLine(
             )
         }
         val primaryText = line.text.ifBlank { line.backgroundText.orEmpty().ifBlank { "♪" } }
-        val primaryWords = if (inlineRuby && line.isTtml && line.words.isEmpty() && primaryText.isNotBlank()) {
+        val primaryWords = if (inlineRuby && line.pronunciationWords.isNotEmpty() && line.words.isEmpty() && primaryText.isNotBlank()) {
             listOf(
                 LyricWord(
                     text = primaryText,
@@ -321,7 +341,7 @@ internal fun AppleMusicLyricLine(
                 )
             )
         } else {
-            line.words
+            line.words.ifEmpty { if (line.text.isBlank()) line.backgroundWords else emptyList() }
         }
         val hasInlineSecondary = singleLine && inlineStaticSecondaryText.isNotBlank()
         if (showPrimaryText && hasInlineSecondary && mergeInlineSecondary) {
@@ -367,18 +387,19 @@ internal fun AppleMusicLyricLine(
                 style = primaryStyle,
                 contentColor = contentColor,
                 wordLiftEnabled = wordLiftEnabled,
-                sustainThresholdMs = sustainThresholdMs,
                 wordLiftScale = wordLiftScale,
+                sustainThresholdMs = sustainThresholdMs,
                 sustainGlowScale = sustainGlowScale,
                 singleLine = singleLine,
                 statusBarMarquee = statusBarMarquee,
                 followWordFocus = followWordFocus,
                 pronunciation = if (inlineRuby) pronunciation else "",
                 pronunciationWords = if (inlineRuby) line.pronunciationWords else emptyList(),
-                rubyStyle = if (inlineRuby) secondaryStyle else null,
+                rubyStyle = if (inlineRuby) rubyStyle else null,
                 rubyBelow = inlineRuby && pronunciationBelow,
-                splitRubyByCharacter = line.isTtml && inlineRuby,
+                splitRubyByCharacter = inlineRuby && (line.words.isNotEmpty() || line.pronunciationWords.isNotEmpty()),
                 onWordClick = onWordClick,
+                onLongPress = onLongClick,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -411,78 +432,32 @@ internal fun AppleMusicLyricLine(
         line.backgroundText?.trim()?.takeIf {
             showBackgroundText && it.isNotBlank() && line.text.isNotBlank()
         }?.let { background ->
-            val backgroundActive = line.isBackgroundActiveAt(currentPositionMs)
-            val backgroundAlpha by animateFloatAsState(
-                targetValue = if (backgroundActive) 1f else 0f,
-                animationSpec = tween(
-                    durationMillis = if (backgroundActive) 300 else 180,
-                    delayMillis = if (backgroundActive) 300 else 0,
-                    easing = FastOutSlowInEasing
-                ),
-                label = "appleLyricsBackgroundAlpha"
-            )
-            val backgroundContent: @Composable () -> Unit = {
-                Column {
-                    TimedLyricText(
-                        text = background,
-                        words = line.backgroundWords,
-                        positionMs = currentPositionMs,
-                        active = active,
-                        style = secondaryStyle.copy(color = contentColor.copy(alpha = alpha * 0.72f)),
-                        contentColor = contentColor,
-                        wordLiftEnabled = wordLiftEnabled,
-                        sustainThresholdMs = sustainThresholdMs,
-                        wordLiftScale = wordLiftScale,
-                        sustainGlowScale = sustainGlowScale,
-                        singleLine = singleLine,
-                        modifier = Modifier.fillMaxWidth().padding(top = 7.dp)
+            Column {
+                TimedLyricText(
+                    text = background,
+                    words = line.backgroundWords,
+                    positionMs = currentPositionMs,
+                    active = active,
+                    style = secondaryStyle.copy(color = contentColor.copy(alpha = alpha * 0.72f)),
+                    contentColor = contentColor,
+                    wordLiftEnabled = wordLiftEnabled,
+                    sustainThresholdMs = sustainThresholdMs,
+                    wordLiftScale = wordLiftScale,
+                    sustainGlowScale = sustainGlowScale,
+                    singleLine = singleLine,
+                    onLongPress = onLongClick,
+                    modifier = Modifier.fillMaxWidth().padding(top = 7.dp)
+                )
+                line.backgroundTranslation?.takeIf { showTranslation && it.isNotBlank() }?.let { translation ->
+                    BasicText(
+                        text = translation,
+                        style = secondaryStyle.copy(color = contentColor.copy(alpha = alpha * 0.62f)),
+                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
                     )
-                    line.backgroundTranslation?.takeIf { showTranslation && it.isNotBlank() }?.let { translation ->
-                        BasicText(
-                            text = translation,
-                            style = secondaryStyle.copy(color = contentColor.copy(alpha = alpha * 0.62f)),
-                            modifier = Modifier.fillMaxWidth().padding(top = 3.dp)
-                        )
-                    }
-                }
-            }
-            if (reserveExtraLyricSpace) {
-                // Keep the x-bg row measured even while it is hidden. The mini preview can then
-                // calculate the target offset from the final row height instead of overshooting
-                // when the background vocal appears.
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(backgroundAlpha)
-                ) {
-                    backgroundContent()
-                }
-            } else {
-                AnimatedVisibility(
-                    visible = backgroundActive,
-                    // ConePlayer gives BG vocals their own reveal: the main line settles first,
-                    // then the x-bg layer enters after a 300 ms beat.
-                    enter = fadeIn(
-                        animationSpec = tween(
-                            durationMillis = 300,
-                            delayMillis = 300,
-                            easing = FastOutSlowInEasing
-                        )
-                    ) + slideInVertically(
-                        animationSpec = tween(
-                            durationMillis = 300,
-                            delayMillis = 300,
-                            easing = FastOutSlowInEasing
-                        ),
-                        initialOffsetY = { it }
-                    ),
-                    exit = fadeOut(animationSpec = tween(180)) +
-                        slideOutVertically(animationSpec = tween(180), targetOffsetY = { it / 3 })
-                ) {
-                    backgroundContent()
                 }
             }
         }
+    }
     }
 }
 
@@ -554,7 +529,17 @@ internal fun Modifier.appleMusicTouchRipple(
                 }
             }
             var dragging = false
+            var longPressed = false
             val width = size.width.toFloat().coerceAtLeast(1f)
+            val longPressJob = onLongPress?.let { callback ->
+                scope.launch {
+                    delay(viewConfiguration.longPressTimeoutMillis)
+                    if (!dragging) {
+                        longPressed = true
+                        callback()
+                    }
+                }
+            }
             fun emitFraction(x: Float) {
                 fractionHandler((x / width).coerceIn(0f, 1f))
             }
@@ -562,11 +547,15 @@ internal fun Modifier.appleMusicTouchRipple(
                 val event = awaitPointerEvent()
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!change.pressed) {
-                    if (!dragging) onTap(change.position, width)
+                    longPressJob?.cancel()
+                    if (!dragging && !longPressed) onTap(change.position, width)
                     break
                 }
                 val dx = change.position.x - down.position.x
-                if (!dragging && abs(dx) >= touchSlop) dragging = true
+                if (!dragging && abs(dx) >= touchSlop) {
+                    dragging = true
+                    longPressJob?.cancel()
+                }
                 if (dragging) {
                     emitFraction(change.position.x)
                     change.consume()

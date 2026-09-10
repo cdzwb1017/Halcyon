@@ -28,6 +28,7 @@ const val THEME_DARK = 2
 const val MONET_OFF = 0
 const val MONET_SYSTEM = 1   // system wallpaper colors (Android 12+)
 const val MONET_COVER = 2    // seed from the current song cover
+const val MONET_CUSTOM = 3   // user-selected Miuix accent color
 
 @Composable
 fun EllaTheme(
@@ -59,6 +60,11 @@ fun EllaTheme(
             // Cover-seeded scheme; until a cover seed is available, fall back to the default scheme
             // so we don't briefly flash system/wallpaper colors.
             MONET_COVER -> if (keyColor != null) {
+                ThemeController(colorSchemeMode = monetSchemeMode, keyColor = keyColor)
+            } else {
+                ThemeController(colorSchemeMode = colorSchemeMode)
+            }
+            MONET_CUSTOM -> if (keyColor != null) {
                 ThemeController(colorSchemeMode = monetSchemeMode, keyColor = keyColor)
             } else {
                 ThemeController(colorSchemeMode = colorSchemeMode)

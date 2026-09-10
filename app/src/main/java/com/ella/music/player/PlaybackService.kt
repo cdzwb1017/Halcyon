@@ -78,6 +78,9 @@ class PlaybackService : MediaLibraryService() {
         const val ACTION_TOGGLE_SHUFFLE = "com.ella.music.action.TOGGLE_SHUFFLE"
         const val ACTION_UPDATE_NOTIFICATION_LYRIC =
             "com.ella.music.action.UPDATE_NOTIFICATION_LYRIC"
+        const val ACTION_SYNC_PLAYBACK_MODE = "com.ella.music.action.SYNC_PLAYBACK_MODE"
+        const val EXTRA_PLAYBACK_MODE_SHUFFLE = "playback_mode_shuffle"
+        const val EXTRA_PLAYBACK_MODE_REPEAT = "playback_mode_repeat"
         const val EXTRA_NOTIFICATION_LYRIC_SONG_KEY = "notification_lyric_song_key"
         const val EXTRA_NOTIFICATION_LYRIC_TEXT = "notification_lyric_text"
         const val EXTRA_NOTIFICATION_LYRIC_SECONDARY_TEXT = "notification_lyric_secondary_text"
@@ -686,11 +689,14 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                appShuffleEnabled = loadAppShuffleEnabled()
                 updateMediaButtonPreferences()
                 notificationProvider.refresh()
             }
 
             override fun onRepeatModeChanged(repeatMode: Int) {
+                appShuffleEnabled = loadAppShuffleEnabled()
+                persistAppRepeatMode(repeatMode)
                 updateMediaButtonPreferences()
                 notificationProvider.refresh()
                 publishExternalPlaybackSnapshot(sessionPresentationPlayer ?: sessionPlayer)
@@ -790,7 +796,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         legacyArtworkPublishSequence++
         LegacyArtworkCompat.clear()
-        PlaybackWidgetUpdater.stopProgressUpdates()
+        PlaybackWidgetUpdater.onPlayerSessionEnded(this)
         bluetoothReceiver?.let {
             runCatching { unregisterReceiver(it) }
             bluetoothReceiver = null
@@ -1117,6 +1123,27 @@ class PlaybackService : MediaLibraryService() {
         return true
     }
 
+    internal fun syncPlaybackModeFromApp(args: Bundle): Boolean {
+        val shuffle = if (args.containsKey(EXTRA_PLAYBACK_MODE_SHUFFLE)) {
+            args.getBoolean(EXTRA_PLAYBACK_MODE_SHUFFLE)
+        } else {
+            loadAppShuffleEnabled()
+        }
+        val repeatMode = if (args.containsKey(EXTRA_PLAYBACK_MODE_REPEAT)) {
+            args.getInt(EXTRA_PLAYBACK_MODE_REPEAT)
+        } else {
+            loadAppRepeatMode()
+        }
+        appShuffleEnabled = shuffle
+        persistAppShuffleEnabled(shuffle)
+        persistAppRepeatMode(repeatMode)
+        mediaSession?.player?.repeatMode = repeatMode
+        updateMediaButtonPreferences()
+        notificationProvider.refresh()
+        publishExternalPlaybackSnapshot()
+        return true
+    }
+
     @OptIn(UnstableApi::class)
     private fun updateMediaButtonPreferences() {
         val session = mediaSession ?: return
@@ -1314,7 +1341,7 @@ class PlaybackService : MediaLibraryService() {
             .apply()
     }
 
-    private fun loadAppShuffleEnabled(): Boolean =
+    internal fun loadAppShuffleEnabled(): Boolean =
         getSharedPreferences(PLAYBACK_PREFS, MODE_PRIVATE)
             .getBoolean(KEY_APP_SHUFFLE, appShuffleEnabled)
 

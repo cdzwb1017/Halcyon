@@ -474,9 +474,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isTelevisionDevice(): Boolean =
-        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-            (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
-            Configuration.UI_MODE_TYPE_TELEVISION
+        com.ella.music.util.isTelevisionDevice(this)
 
     private data class StartupAppearance(
         val themeMode: Int,

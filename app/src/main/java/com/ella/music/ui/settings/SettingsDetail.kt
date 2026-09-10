@@ -70,14 +70,16 @@ fun SettingsDetailScreen(
     onNavigateToLyricPluginSources: () -> Unit = {},
     onNavigateToLastFmSettings: () -> Unit = {},
     onNavigateToBottomNavigationSettings: () -> Unit = {},
+    onNavigateToPlayerShortcutSettings: (String) -> Unit = {},
     onNavigateToAppearancePage: (String) -> Unit = {},
-    mainViewModel: com.ella.music.viewmodel.MainViewModel? = null
+    mainViewModel: com.ella.music.viewmodel.MainViewModel? = null,
+    onCloseSettings: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settingsManager = remember { SettingsManager.getInstance(context) }
     val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-    val pageBackground = if (isDark) Color(0xFF101014) else Color(0xFFF4F4F7)
+    val pageBackground = com.ella.music.ui.components.ellaPageBackground()
 
     val lyricWesternFontName by settingsManager.lyricWesternFontName.collectAsState(initial = "")
     val lyricCjkFontName by settingsManager.lyricCjkFontName.collectAsState(initial = "")
@@ -86,29 +88,46 @@ fun SettingsDetailScreen(
         initial = SettingsManager.HOME_RECENT_SECTION_MODE_ADDED
     )
     val homeHiddenSections by settingsManager.homeHiddenSections.collectAsState(initial = "")
+    val homeTopBarActionOrder by settingsManager.homeTopBarActionOrder.collectAsState(
+        initial = SettingsManager.DEFAULT_HOME_TOP_BAR_ACTION_ORDER
+    )
+    val homeHiddenTopBarActions by settingsManager.homeHiddenTopBarActions.collectAsState(initial = "")
     val homeLibraryTileOrder by settingsManager.homeLibraryTileOrder.collectAsState(initial = SettingsManager.DEFAULT_HOME_LIBRARY_TILE_ORDER)
     val homeHiddenLibraryTiles by settingsManager.homeHiddenLibraryTiles.collectAsState(initial = "")
     val homeOnlineTileOrder by settingsManager.homeOnlineTileOrder.collectAsState(initial = SettingsManager.DEFAULT_HOME_ONLINE_TILE_ORDER)
     val homeHiddenOnlineTiles by settingsManager.homeHiddenOnlineTiles.collectAsState(initial = "")
     val homeTilePinButtonsVisible by settingsManager.homeTilePinButtonsVisible.collectAsState(initial = false)
     val homeCardColor by settingsManager.homeCardColor.collectAsState(initial = "")
-    val homeCardOpacity by settingsManager.homeCardOpacity.collectAsState(initial = 58)
-    val homeTileColors by settingsManager.homeTileColors.collectAsState(initial = "")
-    val homeTileGradientEnabled by settingsManager.homeTileGradientEnabled.collectAsState(initial = false)
-    val homeTileGradientStartColor by settingsManager.homeTileGradientStartColor.collectAsState(initial = "")
     val homeSectionItems = listOf(
         HomePreferenceItem("library", stringResource(R.string.settings_home_section_library), stringResource(R.string.settings_home_section_library_summary)),
-        HomePreferenceItem("online", stringResource(R.string.settings_home_section_online), stringResource(R.string.settings_home_section_online_summary)),
-        HomePreferenceItem("recent", stringResource(R.string.settings_home_section_recent), stringResource(R.string.settings_home_section_recent_summary))
+        HomePreferenceItem("recent", stringResource(R.string.settings_home_section_recent), stringResource(R.string.settings_home_section_recent_summary)),
+        HomePreferenceItem("online", stringResource(R.string.settings_home_section_online), stringResource(R.string.settings_home_section_online_summary))
+    )
+    val homeTopBarActionItems = listOf(
+        HomePreferenceItem(
+            "analytics",
+            stringResource(R.string.settings_home_top_action_analytics),
+            stringResource(R.string.settings_home_top_actions_summary)
+        ),
+        HomePreferenceItem(
+            "ai",
+            stringResource(R.string.settings_home_top_action_ai),
+            stringResource(R.string.settings_home_top_actions_summary)
+        ),
+        HomePreferenceItem(
+            "settings",
+            stringResource(R.string.settings_home_top_action_settings),
+            stringResource(R.string.settings_home_top_actions_summary)
+        )
     )
     val homeLibraryTileItems = listOf(
         HomePreferenceItem("artist", stringResource(R.string.settings_library_tile_artist), stringResource(R.string.settings_library_tile_artist_summary)),
         HomePreferenceItem("album", stringResource(R.string.settings_library_tile_album), stringResource(R.string.settings_library_tile_album_summary)),
+        HomePreferenceItem("recent_playback", stringResource(R.string.recent_playback_title), stringResource(R.string.settings_home_section_recent_playback_summary)),
         HomePreferenceItem("folder", stringResource(R.string.settings_library_tile_folder), stringResource(R.string.settings_library_tile_folder_summary)),
         HomePreferenceItem("folder_tree", stringResource(R.string.settings_library_tile_folder_tree), stringResource(R.string.settings_library_tile_folder_tree_summary)),
         HomePreferenceItem("folder_playlist", stringResource(R.string.settings_library_tile_folder_playlist), stringResource(R.string.settings_library_tile_folder_playlist_summary)),
         HomePreferenceItem("playlist", stringResource(R.string.settings_library_tile_playlist), stringResource(R.string.settings_library_tile_playlist_summary)),
-        HomePreferenceItem("analytics", stringResource(R.string.settings_library_tile_analytics), stringResource(R.string.settings_library_tile_analytics_summary)),
         HomePreferenceItem("genre", stringResource(R.string.settings_library_tile_genre), stringResource(R.string.settings_library_tile_genre_summary)),
         HomePreferenceItem("year", stringResource(R.string.settings_library_tile_year), stringResource(R.string.settings_library_tile_year_summary)),
         HomePreferenceItem("composer", stringResource(R.string.settings_library_tile_composer), stringResource(R.string.settings_library_tile_composer_summary)),
@@ -142,34 +161,39 @@ fun SettingsDetailScreen(
             .background(pageBackground)
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        EllaSmallTopAppBar(
-            title = when {
-                showHomeDisplayPage -> stringResource(R.string.settings_home_display)
-                effectiveMode == SettingsDetailMode.AppearanceHome -> stringResource(R.string.settings_appearance_home)
-                effectiveMode == SettingsDetailMode.LibraryScanning -> stringResource(R.string.settings_library_scan)
-                effectiveMode == SettingsDetailMode.Integrations -> stringResource(R.string.settings_integrations)
-                else -> stringResource(R.string.settings_lyrics)
-            },
-            color = pageBackground,
-            navigationIcon = {
-                IconButton(
-                    onClick = {
-                        if (shouldHandleHomeDisplayBackLocally(showHomeDisplayPage, initialHomeDisplay)) {
-                            showHomeDisplayPage = false
-                        } else {
-                            onBack()
+        val closeActionForHomeDisplay = if (showHomeDisplayPage) onCloseSettings ?: com.ella.music.ui.components.LocalSettingsCloseAction.current else null
+        androidx.compose.runtime.CompositionLocalProvider(
+            com.ella.music.ui.components.LocalSettingsCloseAction provides closeActionForHomeDisplay
+        ) {
+            EllaSmallTopAppBar(
+                title = when {
+                    showHomeDisplayPage -> stringResource(R.string.settings_home_display)
+                    effectiveMode == SettingsDetailMode.AppearanceHome -> stringResource(R.string.settings_appearance_home)
+                    effectiveMode == SettingsDetailMode.LibraryScanning -> stringResource(R.string.settings_library_scan)
+                    effectiveMode == SettingsDetailMode.Integrations -> stringResource(R.string.settings_integrations)
+                    else -> stringResource(R.string.settings_lyrics)
+                },
+                color = pageBackground,
+                navigationIcon = {
+                    IconButton(
+                        onClick = {
+                            if (shouldHandleHomeDisplayBackLocally(showHomeDisplayPage, initialHomeDisplay)) {
+                                showHomeDisplayPage = false
+                            } else {
+                                onBack()
+                            }
                         }
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Regular.Back,
+                            contentDescription = stringResource(R.string.common_back),
+                            tint = MiuixTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = MiuixIcons.Regular.Back,
-                        contentDescription = stringResource(R.string.common_back),
-                        tint = MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
                 }
-            }
-        )
+            )
+        }
 
         Column(
             modifier = Modifier
@@ -193,6 +217,7 @@ fun SettingsDetailScreen(
                             highlightKey = highlightKey,
                             page = APPEARANCE_PAGE_HUB,
                             onNavigateToBottomNavigationSettings = onNavigateToBottomNavigationSettings,
+                            onNavigateToPlayerShortcutSettings = onNavigateToPlayerShortcutSettings,
                             onNavigateToAppearancePage = onNavigateToAppearancePage,
                             onNavigateToLyricFont = onNavigateToLyricFont,
                             onNavigateToHomeDisplay = {
@@ -214,6 +239,9 @@ fun SettingsDetailScreen(
                     sectionOrder = homeSectionOrder,
                     recentSectionMode = homeRecentSectionMode,
                     hiddenSections = homeHiddenSections,
+                    topBarActionItems = homeTopBarActionItems,
+                    topBarActionOrder = homeTopBarActionOrder,
+                    hiddenTopBarActions = homeHiddenTopBarActions,
                     tileItems = homeLibraryTileItems,
                     tileOrder = homeLibraryTileOrder,
                     hiddenTiles = homeHiddenLibraryTiles,
@@ -222,10 +250,6 @@ fun SettingsDetailScreen(
                     hiddenOnlineTiles = homeHiddenOnlineTiles,
                     tilePinButtonsVisible = homeTilePinButtonsVisible,
                     homeCardColor = homeCardColor,
-                    homeCardOpacity = homeCardOpacity,
-                    homeTileColors = homeTileColors,
-                    homeTileGradientEnabled = homeTileGradientEnabled,
-                    homeTileGradientStartColor = homeTileGradientStartColor,
                     highlightKey = highlightKey,
                     onHiddenSectionsChange = { value ->
                         scope.launch { settingsManager.setHomeHiddenSections(value) }
@@ -238,6 +262,12 @@ fun SettingsDetailScreen(
                     },
                     onSectionOrderChange = { value ->
                         scope.launch { settingsManager.setHomeSectionOrder(value) }
+                    },
+                    onTopBarActionOrderChange = { value ->
+                        scope.launch { settingsManager.setHomeTopBarActionOrder(value) }
+                    },
+                    onHiddenTopBarActionsChange = { value ->
+                        scope.launch { settingsManager.setHomeHiddenTopBarActions(value) }
                     },
                     onRecentSectionModeChange = { value ->
                         scope.launch { settingsManager.setHomeRecentSectionMode(value) }
@@ -253,18 +283,6 @@ fun SettingsDetailScreen(
                     },
                     onHomeCardColorChange = { value ->
                         scope.launch { settingsManager.setHomeCardColor(value) }
-                    },
-                    onHomeCardOpacityChange = { value ->
-                        scope.launch { settingsManager.setHomeCardOpacity(value) }
-                    },
-                    onHomeTileColorChange = { id, value ->
-                        scope.launch { settingsManager.setHomeTileColor(id, value) }
-                    },
-                    onHomeTileGradientEnabledChange = { value ->
-                        scope.launch { settingsManager.setHomeTileGradientEnabled(value) }
-                    },
-                    onHomeTileGradientStartColorChange = { value ->
-                        scope.launch { settingsManager.setHomeTileGradientStartColor(value) }
                     }
                 )
                 Spacer(modifier = Modifier.height(160.dp))
@@ -287,7 +305,6 @@ fun SettingsDetailScreen(
                     )
                     SettingsScanSection(highlightKey = highlightKey)
                     SettingsTagScrapingSection(highlightKey = highlightKey)
-                    SettingsDesktopShortcutSection(highlightKey = highlightKey)
                 }
                 SettingsDetailMode.Integrations -> {
                     SettingsAiInterpretationSection(highlightKey = highlightKey)
